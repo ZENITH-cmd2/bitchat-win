@@ -17,5 +17,6 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Assets\online_relays_gps.csv" />
+    <AvaloniaResource Include="Assets/tray.png" />
   </ItemGroup>
 </Project>

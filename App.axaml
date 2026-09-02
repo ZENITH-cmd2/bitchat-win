@@ -1,8 +1,26 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="BitchatWin.App"
-             RequestedThemeVariant="Default">
-             <!-- "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options. -->
+             RequestedThemeVariant="Dark">
+
+    <Application.Resources>
+        <!-- Fluent paints focus rings, sliders and checkboxes with the Windows
+             accent colour, which on this machine is a loud red that broke the
+             muted palette. These have to live at application scope: the theme
+             resolves them there, so overriding them per-window has no effect. -->
+        <Color x:Key="SystemAccentColor">#2F8B52</Color>
+        <Color x:Key="SystemAccentColorDark1">#27764A</Color>
+        <Color x:Key="SystemAccentColorDark2">#1F5F3C</Color>
+        <Color x:Key="SystemAccentColorLight1">#3FA85F</Color>
+        <Color x:Key="SystemAccentColorLight2">#63C783</Color>
+
+        <SolidColorBrush x:Key="SystemControlHighlightAccentBrush" Color="#3FA85F" />
+        <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#3FA85F" />
+        <SolidColorBrush x:Key="TextControlSelectionHighlightColor" Color="#2F8B52" />
+        <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#2F8B52" />
+        <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#27764A" />
+        <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#1F5F3C" />
+    </Application.Resources>
 
     <Application.Styles>
         <FluentTheme />

@@ -4,8 +4,8 @@ Client Windows **non ufficiale** per i canali geohash di [bitchat](https://githu
 
 Implementa la metà "internet" del protocollo — le **location channels** trasportate su
 relay Nostr — e interopera con i client bitchat ufficiali per iOS e Android.
-La mesh Bluetooth non è implementata: su Windows la modalità *peripheral* BLE è
-troppo limitata perché un PC partecipi alla mesh come nodo vero.
+La mesh Bluetooth non è implementata; vedi *Senza internet* per che cosa
+l'hardware Windows riesce e non riesce a fare.
 
 ## Avvio rapido
 
@@ -25,6 +25,8 @@ Opzioni da riga di comando:
 | `BitchatWin.exe --selftest` | verifica crittografia, geohash e selezione relay |
 | `BitchatWin.exe --selftest --scan` | osserva 45s di traffico bitchat reale (sola lettura) |
 | `BitchatWin.exe --selftest --listen u0nd9` | ascolta un canale specifico (sola lettura) |
+| `BitchatWin.exe --selftest --sendtest` | pubblica un evento di prova in un geohash deserto |
+| `BitchatWin.exe --hidden` | parte già nascosta nella tray |
 
 ## Come funziona
 
@@ -74,6 +76,60 @@ scelta del client ufficiale.
 prima di raggiungere l'interfaccia, così un relay ostile non può fabbricare
 messaggi a nome altrui. I duplicati fra i 5 relay vengono uniti.
 
+## Discrezione sullo schermo
+
+La finestra è pensata per non dichiarare cosa sia a chi guarda il monitor di
+sfuggita.
+
+| Comando | Effetto |
+|---|---|
+| `Esc` | nasconde la finestra all'istante; il canale resta connesso e i messaggi continuano ad arrivare |
+| `Ctrl+M` | modalità compatta: pannello 360×300 con la sola conversazione e il campo di scrittura |
+| `Ctrl+T` | sempre in primo piano |
+| clic sull'icona nella tray | mostra o nasconde |
+
+Le scorciatoie usano il *tunnelling* degli eventi, quindi funzionano anche
+mentre stai scrivendo in un campo di testo: un tasto di fuga che si attiva solo
+quando nessun controllo ha il fuoco non serve a niente.
+
+Nella riga **aspetto** ci sono inoltre:
+
+- **fuori da barra e Alt+Tab** — toglie la finestra dalla barra delle
+  applicazioni e, tramite `WS_EX_TOOLWINDOW`, anche dall'elenco Alt+Tab, che è
+  il posto dove qualcuno la noterebbe più facilmente;
+- **opacità** regolabile da 35% a 100%;
+- **titolo** libero: quello che appare nella barra del titolo e in Alt+Tab. Il
+  valore predefinito è `Note`, non il nome dell'applicazione.
+
+La chiusura della finestra la nasconde invece di uscire, così un Alt+F4 distratto
+non fa perdere il canale; per uscire davvero si usa la voce *Esci* nel menu della
+tray. Tutte le preferenze sono salvate in
+`%APPDATA%\bitchat-win\settings.json`, e `--hidden` avvia l'app già nascosta.
+
+## Senza internet
+
+La mesh Bluetooth **non è implementata**, e su questo hardware non lo sarebbe
+comunque per intero. La sonda in `tools/ble-probe` (`dotnet run`) misura le tre capacità
+che servono:
+
+| Capacità | Adattatore Realtek provato |
+|---|---|
+| Scansione BLE (central) | funziona — 40 dispositivi visti in 8 s |
+| Advertising semplice | funziona — `Waiting → Started` |
+| Server GATT connettibile (peripheral) | **`Aborted`**, anche con caratteristica valida |
+
+Nella mesh bitchat i peer si collegano al server GATT l'uno dell'altro: senza
+quello un PC può vedere la mesh e collegarsi ai telefoni, ma non farsi trovare,
+e due PC non si parlerebbero mai. `IsPeripheralRoleSupported` riporta `True`, ma
+l'annuncio viene comunque interrotto — la capacità dichiarata dal driver non
+corrisponde a quella reale.
+
+Resta praticabile una **rete locale senza internet**: i client bitchat accettano
+relay personalizzati, quindi un relay Nostr in ascolto sulla LAN fa funzionare i
+canali geohash fra dispositivi collegati allo stesso Wi-Fi anche senza uscita
+verso internet. Non è la mesh, ma non richiede né internet né hardware che qui
+non funziona.
+
 ## Verifica di interoperabilità
 
 `--selftest` copre vettori geohash noti, serializzazione canonica NIP-01,
@@ -102,7 +158,7 @@ sopra. Nessuno dei due era visibile senza pubblicare davvero.
 
 ```
 Protocol/Geohash.cs             encoder/decoder base32
-Protocol/GeoRelayDirectory.cs   441 relay geolocalizzati, selezione dei 5 più vicini
+Protocol/GeoRelayDirectory.cs   441 righe CSV -> 326 relay, selezione dei 5 più vicini
 Nostr/NostrEvent.cs             serializzazione canonica, event ID, firma/verifica
 Nostr/NostrCrypto.cs            secp256k1 Schnorr BIP-340
 Nostr/NostrIdentity.cs          derivazione identità per canale
@@ -112,6 +168,7 @@ Services/GeohashChannelService.cs  logica del canale: join, invio, presenza
 Services/IdentityStore.cs       seme dispositivo protetto DPAPI
 MainWindow.axaml                interfaccia Avalonia
 SelfTest.cs                     verifiche headless
+tools/ble-probe/                sonda capacità Bluetooth LE del PC
 ```
 
 ## Compilare

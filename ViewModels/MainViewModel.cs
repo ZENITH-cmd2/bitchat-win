@@ -170,6 +170,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
         set => Set(ref _isJoined, value);
     }
 
+    private string _windowTitle = "Note";
+    public string WindowTitle
+    {
+        get => _windowTitle;
+        set => Set(ref _windowTitle, string.IsNullOrWhiteSpace(value) ? " " : value);
+    }
+
     private void Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {
         if (Equals(field, value)) return;

@@ -14,6 +14,19 @@ public sealed class AppSettings
     public string Nickname { get; set; } = "anon";
     public string LastGeohash { get; set; } = "u0nd";
 
+    // Discretion: how the window presents itself on a shared or overlooked screen.
+    public bool CompactMode { get; set; }
+    public bool AlwaysOnTop { get; set; }
+    public bool HideFromTaskbar { get; set; }
+    public double Opacity { get; set; } = 1.0;
+
+    /// <summary>
+    /// Shown in the title bar and in Alt+Tab. Deliberately not the app name by
+    /// default: the window should not announce what it is to someone glancing
+    /// at the screen.
+    /// </summary>
+    public string WindowTitle { get; set; } = "Note";
+
     private static string SettingsPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "bitchat-win",
