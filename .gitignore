@@ -1,0 +1,12 @@
+# Build output
+bin/
+obj/
+publish-new/
+*.user
+.vs/
+
+# Self test artefacts
+selftest-output.txt
+
+# The published app is committed on purpose (publish/), but never its symbols
+publish/*.pdb
