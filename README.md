@@ -112,17 +112,36 @@ La mesh Bluetooth **non è implementata**, e su questo hardware non lo sarebbe
 comunque per intero. La sonda in `tools/ble-probe` (`dotnet run`) misura le tre capacità
 che servono:
 
-| Capacità | Adattatore Realtek provato |
+| Capacità | Realtek RTL8761 (`VID_0BDA&PID_4853`) |
 |---|---|
-| Scansione BLE (central) | funziona — 40 dispositivi visti in 8 s |
-| Advertising semplice | funziona — `Waiting → Started` |
-| Server GATT connettibile (peripheral) | **`Aborted`**, anche con caratteristica valida |
+| Scansione BLE (central) | funziona — 28-40 dispositivi in 8 s |
+| Advertising semplice, non connettibile | funziona — `Waiting → Started` |
+| Server GATT connettibile (peripheral) | **`Aborted`**, immediato |
 
 Nella mesh bitchat i peer si collegano al server GATT l'uno dell'altro: senza
 quello un PC può vedere la mesh e collegarsi ai telefoni, ma non farsi trovare,
-e due PC non si parlerebbero mai. `IsPeripheralRoleSupported` riporta `True`, ma
-l'annuncio viene comunque interrotto — la capacità dichiarata dal driver non
-corrisponde a quella reale.
+e due PC non si parlerebbero mai.
+
+Il dettaglio che rende la diagnosi solida è l'asimmetria delle transizioni di
+stato. L'advertising semplice passa da `Waiting` a `Started`: la richiesta viene
+accodata e poi accettata. Quello connettibile va dritto ad `Aborted` senza
+passare da `Waiting`, cioè viene **rifiutato**, non messo in coda. Una carenza
+temporanea di risorse — altri dispositivi collegati, slot di advertising
+occupati — si manifesterebbe come attesa, non come rifiuto immediato. E il
+risultato si riproduce fra sessioni diverse e attraverso spegnimenti e
+riaccensioni della radio.
+
+`IsPeripheralRoleSupported` riporta `True`: è un bit dichiarato dal driver, non
+un comportamento verificato.
+
+La sonda prova tre combinazioni di parametri, ma solo `connettibile +
+individuabile` viene effettivamente tentata; le altre due restano a `Created`
+senza alcuna transizione, perché Windows non le avvia proprio. Non dicono nulla
+sull'hardware e vanno lette come tali.
+
+Resta un'ipotesi non esclusa del tutto: un altro processo che detiene già il
+ruolo peripheral. Non è interrogabile dall'esterno, ma il rifiuto immediato la
+rende poco probabile.
 
 Resta praticabile una **rete locale senza internet**: i client bitchat accettano
 relay personalizzati, quindi un relay Nostr in ascolto sulla LAN fa funzionare i

@@ -9,8 +9,7 @@ using Windows.Devices.Radios;
 
 Console.WriteLine("=== BLE capability probe ===\n");
 
-var radios = await Radio.GetRadiosAsync();
-foreach (var radio in radios.Where(r => r.Kind == RadioKind.Bluetooth))
+foreach (var radio in (await Radio.GetRadiosAsync()).Where(r => r.Kind == RadioKind.Bluetooth))
 {
     Console.WriteLine($"radio: {radio.Name}  state={radio.State}");
 }
@@ -28,74 +27,19 @@ Console.WriteLine($"CentralRoleSupported   : {adapter.IsCentralRoleSupported}");
 Console.WriteLine($"PeripheralRoleSupported: {adapter.IsPeripheralRoleSupported}");
 Console.WriteLine($"AdvertisementOffload   : {adapter.IsAdvertisementOffloadSupported}");
 
-// Capability flags can lie; the only honest test is to actually publish a GATT
-// service and start advertising, which is exactly what a mesh node must do.
-Console.WriteLine("\n--- prova reale: pubblicazione servizio GATT + advertising ---");
-try
-{
-    // bitchat's service UUID, so the probe exercises the real thing.
-    var serviceUuid = Guid.Parse("F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C");
-    var result = await GattServiceProvider.CreateAsync(serviceUuid);
-    Console.WriteLine($"CreateAsync            : {result.Error}");
+// Capability flags are declarations, not behaviour. The only honest test is to
+// publish a real GATT service and try to advertise it, which is exactly what a
+// mesh node must do. Every variant below carries a characteristic: a service
+// with none never advertises at all, which would make the comparison useless.
+Console.WriteLine("\n--- server GATT: tre combinazioni a confronto ---");
+await TryAdvertiseAsync("connettibile + individuabile", connectable: true, discoverable: true);
+await TryAdvertiseAsync("connettibile, non individuabile", connectable: true, discoverable: false);
+await TryAdvertiseAsync("individuabile, NON connettibile", connectable: false, discoverable: true);
 
-    if (result.Error == BluetoothError.Success)
-    {
-        var provider = result.ServiceProvider;
-
-        // A service with no characteristics is a common reason advertising is
-        // refused, so give it the read/write/notify shape a mesh node needs.
-        var charUuid = Guid.Parse("A1B2C3D4-E5F6-4A5B-8C9D-0E1F2A3B4C5D");
-        var charResult = await provider.Service.CreateCharacteristicAsync(charUuid,
-            new GattLocalCharacteristicParameters
-            {
-                CharacteristicProperties = GattCharacteristicProperties.Read |
-                                           GattCharacteristicProperties.Write |
-                                           GattCharacteristicProperties.Notify,
-                ReadProtectionLevel = GattProtectionLevel.Plain,
-                WriteProtectionLevel = GattProtectionLevel.Plain
-            });
-        Console.WriteLine($"characteristic         : {charResult.Error}");
-
-        var statuses = new List<string>();
-        provider.AdvertisementStatusChanged += (s, _) => { lock (statuses) statuses.Add(s.AdvertisementStatus.ToString()); };
-
-        var parameters = new GattServiceProviderAdvertisingParameters
-        {
-            IsDiscoverable = true,
-            IsConnectable = true
-        };
-        provider.StartAdvertising(parameters);
-
-        for (int i = 0; i < 6; i++)
-        {
-            await Task.Delay(1000);
-            Console.WriteLine($"  t+{i + 1}s status        : {provider.AdvertisementStatus}");
-            if (provider.AdvertisementStatus == GattServiceProviderAdvertisementStatus.Started) break;
-        }
-
-        var final = provider.AdvertisementStatus;
-        lock (statuses) Console.WriteLine($"transizioni            : {string.Join(" -> ", statuses)}");
-        provider.StopAdvertising();
-
-        Console.WriteLine(final == GattServiceProviderAdvertisementStatus.Started
-            ? "ESITO: peripheral FUNZIONANTE — il PC puo' fare da nodo mesh"
-            : $"ESITO: peripheral NON funzionante (stato finale: {final})");
-    }
-    else
-    {
-        Console.WriteLine("ESITO: peripheral NON disponibile");
-    }
-}
-catch (Exception ex)
-{
-    Console.WriteLine($"eccezione: {ex.GetType().Name}: {ex.Message}");
-    Console.WriteLine("ESITO: peripheral NON disponibile");
-}
-
-// Distinguishes "this radio cannot advertise at all" from "it can advertise but
-// not host a connectable GATT server". The mesh needs the latter, but knowing
-// which wall we hit says whether the driver or the hardware is the problem.
-Console.WriteLine("\n--- prova reale: advertising semplice (senza GATT) ---");
+// In WinRT connectable advertising is reachable ONLY through GattServiceProvider;
+// this publisher is always non-connectable. So "publisher starts, provider does
+// not" already isolates the peripheral role as the missing capability.
+Console.WriteLine("\n--- advertising semplice, senza GATT (sempre non connettibile) ---");
 try
 {
     var publisher = new BluetoothLEAdvertisementPublisher();
@@ -112,26 +56,80 @@ try
         if (publisher.Status == BluetoothLEAdvertisementPublisherStatus.Started) break;
     }
 
-    Console.WriteLine($"publisher status       : {publisher.Status}");
-    lock (states) Console.WriteLine($"transizioni            : {string.Join(" -> ", states)}");
+    Console.WriteLine($"  status      : {publisher.Status}");
+    lock (states) Console.WriteLine($"  transizioni : {string.Join(" -> ", states)}");
     publisher.Stop();
-
-    Console.WriteLine(publisher.Status == BluetoothLEAdvertisementPublisherStatus.Started
-        ? "ESITO: la radio SA annunciare (il limite e' il server GATT)"
-        : "ESITO: la radio NON annuncia affatto");
 }
 catch (Exception ex)
 {
-    Console.WriteLine($"eccezione: {ex.GetType().Name}: {ex.Message}");
+    Console.WriteLine($"  eccezione: {ex.GetType().Name}: {ex.Message}");
 }
 
-// Scanning is the other half, and it is far more reliably supported.
-Console.WriteLine("\n--- prova reale: scansione BLE 8s ---");
+Console.WriteLine("\n--- scansione BLE 8s (ruolo central) ---");
 var seen = new HashSet<ulong>();
 var watcher = new BluetoothLEAdvertisementWatcher { ScanningMode = BluetoothLEScanningMode.Active };
 watcher.Received += (_, e) => { lock (seen) seen.Add(e.BluetoothAddress); };
 watcher.Start();
 await Task.Delay(8000);
 watcher.Stop();
-Console.WriteLine($"dispositivi BLE distinti visti: {seen.Count}");
-Console.WriteLine(seen.Count > 0 ? "ESITO: scansione (central) FUNZIONANTE" : "ESITO: nessun dispositivo visto (scansione forse bloccata)");
+Console.WriteLine($"  dispositivi BLE distinti: {seen.Count}");
+Console.WriteLine(seen.Count > 0 ? "  central FUNZIONANTE" : "  nessun dispositivo visto");
+
+static async Task TryAdvertiseAsync(string label, bool connectable, bool discoverable)
+{
+    Console.WriteLine($"\n  [{label}]");
+    try
+    {
+        var result = await GattServiceProvider.CreateAsync(Guid.Parse("F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C"));
+        if (result.Error != BluetoothError.Success)
+        {
+            Console.WriteLine($"    CreateAsync : {result.Error}");
+            return;
+        }
+
+        var provider = result.ServiceProvider;
+
+        var charResult = await provider.Service.CreateCharacteristicAsync(
+            Guid.Parse("A1B2C3D4-E5F6-4A5B-8C9D-0E1F2A3B4C5D"),
+            new GattLocalCharacteristicParameters
+            {
+                CharacteristicProperties = GattCharacteristicProperties.Read |
+                                           GattCharacteristicProperties.Write |
+                                           GattCharacteristicProperties.Notify,
+                ReadProtectionLevel = GattProtectionLevel.Plain,
+                WriteProtectionLevel = GattProtectionLevel.Plain
+            });
+
+        if (charResult.Error != BluetoothError.Success)
+        {
+            Console.WriteLine($"    caratteristica: {charResult.Error}");
+            return;
+        }
+
+        var states = new List<string>();
+        provider.AdvertisementStatusChanged += (s, _) => { lock (states) states.Add(s.AdvertisementStatus.ToString()); };
+
+        provider.StartAdvertising(new GattServiceProviderAdvertisingParameters
+        {
+            IsDiscoverable = discoverable,
+            IsConnectable = connectable
+        });
+
+        for (int i = 0; i < 5; i++)
+        {
+            await Task.Delay(1000);
+            if (provider.AdvertisementStatus == GattServiceProviderAdvertisementStatus.Started) break;
+        }
+
+        Console.WriteLine($"    status      : {provider.AdvertisementStatus}");
+        lock (states)
+        {
+            Console.WriteLine($"    transizioni : {(states.Count == 0 ? "(nessuna)" : string.Join(" -> ", states))}");
+        }
+        provider.StopAdvertising();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"    eccezione: {ex.GetType().Name}: {ex.Message}");
+    }
+}
