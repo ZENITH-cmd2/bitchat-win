@@ -26,6 +26,7 @@ Opzioni da riga di comando:
 | `BitchatWin.exe --selftest --scan` | osserva 45s di traffico bitchat reale (sola lettura) |
 | `BitchatWin.exe --selftest --listen u0nd9` | ascolta un canale specifico (sola lettura) |
 | `BitchatWin.exe --selftest --sendtest` | pubblica un evento di prova in un geohash deserto |
+| `BitchatWin.exe --selftest --localtest` | relay locale: due client, storico e firme, senza internet |
 | `BitchatWin.exe --hidden` | parte già nascosta nella tray |
 
 ## Come funziona
@@ -143,11 +144,29 @@ Resta un'ipotesi non esclusa del tutto: un altro processo che detiene già il
 ruolo peripheral. Non è interrogabile dall'esterno, ma il rifiuto immediato la
 rende poco probabile.
 
-Resta praticabile una **rete locale senza internet**: i client bitchat accettano
-relay personalizzati, quindi un relay Nostr in ascolto sulla LAN fa funzionare i
-canali geohash fra dispositivi collegati allo stesso Wi-Fi anche senza uscita
-verso internet. Non è la mesh, ma non richiede né internet né hardware che qui
-non funziona.
+### Rete locale senza internet (implementato)
+
+L'app include un **relay Nostr minimale**. Spuntando *ospita relay* nella riga
+`offline` il PC apre un relay sulla porta 8787 e lo annuncia in broadcast UDP
+sulla rete locale; gli altri PC lo trovano da soli e riempiono il campo
+dell'indirizzo senza che nessuno debba dettare un IP. Con *solo rete locale* i
+relay pubblici vengono esclusi del tutto: nessun pacchetto esce verso internet.
+
+Funziona su una LAN, su un router senza connettivita' e sull'hotspot di Windows,
+quindi non serve nemmeno un router. Il relay verifica event ID e firma di ogni
+evento prima di accettarlo, esattamente come un relay pubblico, e conserva gli
+ultimi 2000 eventi cosi' chi entra dopo vede la conversazione.
+
+Il WebSocket e' implementato su `TcpListener` con handshake RFC 6455 scritto a
+mano: `HttpListener` richiederebbe una URL ACL registrata da amministratore per
+ascoltare su un indirizzo di rete, il che renderebbe impossibile il semplice
+"avvia e funziona".
+
+**Questo vale fra PC che usano questo client.** I telefoni con bitchat ufficiale
+restano fuori: i loro canali geohash sono legati ai relay geografici
+(`closestRelays`), e i relay personalizzati finiscono in `defaultRelays`, usato
+solo per i messaggi privati e come ripiego. Non c'e' un'impostazione lato app
+che sposti i canali pubblici su un relay locale.
 
 ## Verifica di interoperabilità
 
@@ -185,6 +204,8 @@ Nostr/NostrPoW.cs               proof-of-work NIP-13
 Nostr/RelayPool.cs              WebSocket multi-relay, riconnessione, dedup
 Services/GeohashChannelService.cs  logica del canale: join, invio, presenza
 Services/IdentityStore.cs       seme dispositivo protetto DPAPI
+Services/LocalRelayServer.cs    relay Nostr incorporato (WebSocket su TcpListener)
+Services/LanBeacon.cs           scoperta del relay via broadcast UDP
 MainWindow.axaml                interfaccia Avalonia
 SelfTest.cs                     verifiche headless
 tools/ble-probe/                sonda capacità Bluetooth LE del PC

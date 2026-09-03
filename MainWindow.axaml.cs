@@ -27,6 +27,10 @@ public partial class MainWindow : Window
     private readonly AppSettings _settings = AppSettings.Load();
     private readonly GeohashChannelService _channel;
 
+    private readonly LocalRelayServer _relayServer = new();
+    private readonly LanBeacon _beacon = new();
+    private DispatcherTimer? _relayStatusTimer;
+
     private TrayIcon? _tray;
     private double _restoreWidth = 1000;
     private double _restoreHeight = 640;
@@ -75,6 +79,15 @@ public partial class MainWindow : Window
         HideButton.Click += (_, _) => HideToTray();
         HideButtonCompact.Click += (_, _) => HideToTray();
 
+        HostRelayCheck.IsCheckedChanged += (_, _) => ApplyLocalRelayHosting();
+        LocalOnlyCheck.IsCheckedChanged += (_, _) => ApplyLocalRelay();
+        RelayBox.LostFocus += (_, _) => ApplyLocalRelay();
+
+        _relayServer.Log += AppendLog;
+        _beacon.Log += AppendLog;
+        _beacon.RelayDiscovered += url => Dispatcher.UIThread.Post(() => OnRelayDiscovered(url));
+        _beacon.StartListening();
+
         TopmostCheck.IsCheckedChanged += (_, _) => ApplyTopmost();
         TaskbarCheck.IsCheckedChanged += (_, _) => ApplyTaskbarVisibility();
         OpacitySlider.ValueChanged += (_, _) => ApplyOpacity();
@@ -119,9 +132,97 @@ public partial class MainWindow : Window
         // refresh a style would leave it invisible on startup.
         ApplyExtendedStyle();
 
+        RelayBox.Text = _settings.LocalRelayUrl;
+        LocalOnlyCheck.IsChecked = _settings.LocalOnly;
+        HostRelayCheck.IsChecked = _settings.HostLocalRelay;
+
         _windowReady = true;
 
+        // Applied after the guard is lifted so the handlers above act for real.
+        if (_settings.HostLocalRelay) ApplyLocalRelayHosting();
+        ApplyLocalRelay();
+
         if (Environment.GetCommandLineArgs().Contains("--hidden")) HideToTray();
+    }
+
+    // MARK: - Local network (no internet)
+
+    private void ApplyLocalRelayHosting()
+    {
+        if (!_windowReady) return;
+
+        _settings.HostLocalRelay = HostRelayCheck.IsChecked ?? false;
+        _settings.Save();
+
+        if (_settings.HostLocalRelay) StartHosting();
+        else StopHosting();
+    }
+
+    private void StartHosting()
+    {
+        try
+        {
+            int port = _relayServer.Start();
+            _beacon.StartAnnouncing(port);
+
+            // This machine talks to its own relay over loopback; the address other
+            // machines need is shown alongside, and broadcast for them anyway.
+            RelayBox.Text = $"ws://127.0.0.1:{port}";
+            ApplyLocalRelay();
+
+            _relayStatusTimer ??= new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+            _relayStatusTimer.Tick -= OnRelayStatusTick;
+            _relayStatusTimer.Tick += OnRelayStatusTick;
+            _relayStatusTimer.Start();
+            OnRelayStatusTick(this, EventArgs.Empty);
+
+            string addresses = string.Join(", ", LocalRelayServer.LocalAddresses().Select(a => $"ws://{a}:{port}"));
+            AppendSystem($"relay locale avviato. Sugli altri PC: {(addresses.Length == 0 ? "nessun indirizzo di rete" : addresses)}");
+            AppendSystem("sulla stessa rete l'indirizzo viene trovato da solo — basta spuntare \"solo rete locale\".");
+        }
+        catch (Exception ex)
+        {
+            AppendSystem("relay locale non avviato: " + ex.Message);
+            HostRelayCheck.IsChecked = false;
+        }
+    }
+
+    private void StopHosting()
+    {
+        _relayStatusTimer?.Stop();
+        _beacon.StopAnnouncing();
+        _ = _relayServer.StopAsync();
+        LocalRelayStatus.Text = string.Empty;
+    }
+
+    private void OnRelayStatusTick(object? sender, EventArgs e)
+    {
+        LocalRelayStatus.Text = _relayServer.IsRunning
+            ? $"porta {_relayServer.Port} · {_relayServer.ClientCount} connessi · {_relayServer.StoredEventCount} eventi"
+            : string.Empty;
+    }
+
+    private void OnRelayDiscovered(string url)
+    {
+        // Never override a relay the user typed, and never point a host at itself
+        // through the network stack when loopback already works.
+        if (_relayServer.IsRunning) return;
+        if (!string.IsNullOrWhiteSpace(RelayBox.Text)) return;
+
+        RelayBox.Text = url;
+        ApplyLocalRelay();
+        AppendSystem($"trovato un relay locale su {url} — spunta \"solo rete locale\" per usarlo senza internet.");
+    }
+
+    private void ApplyLocalRelay()
+    {
+        if (!_windowReady) return;
+
+        _settings.LocalRelayUrl = RelayBox.Text?.Trim() ?? string.Empty;
+        _settings.LocalOnly = LocalOnlyCheck.IsChecked ?? false;
+        _settings.Save();
+
+        _channel.SetLocalRelay(_settings.LocalRelayUrl, _settings.LocalOnly);
     }
 
     private void OnGlobalKeyDown(object? sender, KeyEventArgs e)
@@ -542,6 +643,9 @@ public partial class MainWindow : Window
         }
 
         if (_tray is not null) _tray.IsVisible = false;
+        _relayStatusTimer?.Stop();
+        await _beacon.DisposeAsync();
+        await _relayServer.DisposeAsync();
         await _channel.DisposeAsync();
     }
 }

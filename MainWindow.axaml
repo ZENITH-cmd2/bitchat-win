@@ -121,6 +121,16 @@
                 </StackPanel>
 
                 <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="offline" Classes="label" Width="52" />
+                    <CheckBox x:Name="HostRelayCheck" Content="ospita relay" Foreground="#8FA88F" FontSize="12"
+                              ToolTip.Tip="Avvia un relay Nostr su questo PC e lo annuncia sulla rete locale" />
+                    <TextBox x:Name="RelayBox" Width="220" Watermark="ws://192.168.1.10:8787" />
+                    <CheckBox x:Name="LocalOnlyCheck" Content="solo rete locale" Foreground="#8FA88F" FontSize="12"
+                              ToolTip.Tip="Esclude i relay pubblici: nessun traffico verso internet" />
+                    <TextBlock x:Name="LocalRelayStatus" Classes="label" Text="" />
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Spacing="8">
                     <TextBlock Text="aspetto" Classes="label" Width="52" />
                     <CheckBox x:Name="TopmostCheck" Content="sempre davanti" Foreground="#8FA88F" FontSize="12" />
                     <CheckBox x:Name="TaskbarCheck" Content="fuori da barra e Alt+Tab" Foreground="#8FA88F" FontSize="12" />

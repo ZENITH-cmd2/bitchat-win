@@ -14,6 +14,11 @@ public sealed class AppSettings
     public string Nickname { get; set; } = "anon";
     public string LastGeohash { get; set; } = "u0nd";
 
+    // Local network operation, for messaging with no internet at all.
+    public bool HostLocalRelay { get; set; }
+    public bool LocalOnly { get; set; }
+    public string LocalRelayUrl { get; set; } = string.Empty;
+
     // Discretion: how the window presents itself on a shared or overlooked screen.
     public bool CompactMode { get; set; }
     public bool AlwaysOnTop { get; set; }

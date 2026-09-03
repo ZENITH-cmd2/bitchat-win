@@ -19,4 +19,14 @@
     <EmbeddedResource Include="Assets\online_relays_gps.csv" />
     <AvaloniaResource Include="Assets/tray.png" />
   </ItemGroup>
+
+  <!-- tools/ holds standalone diagnostic projects with their own build output;
+       without this the SDK globs their sources and obj/ into this project. -->
+  <ItemGroup>
+    <Compile Remove="tools/**" />
+    <None Remove="tools/**" />
+    <EmbeddedResource Remove="tools/**" />
+    <AvaloniaResource Remove="tools/**" />
+    <AvaloniaXaml Remove="tools/**" />
+  </ItemGroup>
 </Project>

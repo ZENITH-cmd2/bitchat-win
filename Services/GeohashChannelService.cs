@@ -78,6 +78,41 @@ public sealed class GeohashChannelService : IAsyncDisposable
     public NostrIdentity? CurrentIdentity { get; private set; }
     public string Nickname { get; set; } = "anon";
 
+    /// <summary>An extra relay to use alongside (or instead of) the geographic ones.</summary>
+    public string? ExtraRelay { get; private set; }
+
+    /// <summary>
+    /// When true only <see cref="ExtraRelay"/> is used. This is what makes the
+    /// app work with no internet at all: nothing is sent to, or expected from,
+    /// the public relays.
+    /// </summary>
+    public bool LocalOnly { get; private set; }
+
+    /// <summary>Points the client at a local relay, applying it to a live channel too.</summary>
+    public void SetLocalRelay(string? relayUrl, bool localOnly)
+    {
+        ExtraRelay = string.IsNullOrWhiteSpace(relayUrl) ? null : relayUrl.Trim();
+        LocalOnly = localOnly && ExtraRelay is not null;
+
+        if (CurrentGeohash is null) return;
+
+        var relays = BuildRelays(CurrentGeohash);
+        Log?.Invoke($"relay in uso: {(relays.Count == 0 ? "nessuno" : string.Join("  ", relays))}");
+        _pool.SetRelays(relays);
+    }
+
+    /// <summary>
+    /// The relay set for a channel: the five nearest public relays, plus a local
+    /// one when configured — or only the local one in offline mode.
+    /// </summary>
+    private List<string> BuildRelays(string geohash)
+    {
+        var relays = new List<string>();
+        if (!LocalOnly) relays.AddRange(GeoRelayDirectory.Shared.ClosestRelays(geohash, RelayCount));
+        if (ExtraRelay is not null) relays.Add(ExtraRelay);
+        return relays.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
     public GeohashChannelService(IdentityStore identityStore)
     {
         _identityStore = identityStore;
@@ -166,11 +201,16 @@ public sealed class GeohashChannelService : IAsyncDisposable
         CurrentGeohash = geohash;
         CurrentIdentity = NostrIdentity.DeriveForGeohash(_deviceSeed, geohash);
 
-        var relays = GeoRelayDirectory.Shared.ClosestRelays(geohash, RelayCount);
-        if (relays.Count == 0) throw new InvalidOperationException("Relay directory is empty");
+        var relays = BuildRelays(geohash);
+        if (relays.Count == 0)
+        {
+            throw new InvalidOperationException(LocalOnly
+                ? "Modalità solo-locale senza relay locale configurato"
+                : "Directory dei relay vuota");
+        }
 
         var (lat, lon) = Geohash.DecodeCenter(geohash);
-        Log?.Invoke($"joining #{geohash}  (~{lat:F3}, {lon:F3})  as {MyDisplayName}");
+        Log?.Invoke($"joining #{geohash}  (~{lat:F3}, {lon:F3})  as {MyDisplayName}{(LocalOnly ? "  [solo rete locale]" : "")}");
         foreach (string relay in relays) Log?.Invoke($"relay      {relay}");
 
         _pool.SetRelays(relays);
@@ -277,12 +317,16 @@ public sealed class GeohashChannelService : IAsyncDisposable
         if (!string.Equals(nostrEvent.Tag("g"), geohash, StringComparison.OrdinalIgnoreCase)) return;
 
         var timestamp = DateTimeOffset.FromUnixTimeSeconds(nostrEvent.CreatedAt);
-        string nickname = nostrEvent.Tag("n")?.Trim() ?? string.Empty;
-        if (nickname.Length == 0) nickname = "anon";
-        string displayName = FormatDisplayName(nickname, nostrEvent.Pubkey);
 
         bool isMine = CurrentIdentity is not null &&
                       string.Equals(nostrEvent.Pubkey, CurrentIdentity.PublicKeyHex, StringComparison.OrdinalIgnoreCase);
+
+        string nickname = nostrEvent.Tag("n")?.Trim() ?? string.Empty;
+        if (nickname.Length == 0) nickname = "anon";
+
+        // Our own presence beacons carry no nickname by design, so falling back
+        // to "anon" for them would list us under a name we never chose.
+        string displayName = isMine ? MyDisplayName : FormatDisplayName(nickname, nostrEvent.Pubkey);
 
         TouchParticipant(nostrEvent.Pubkey, displayName, timestamp);
 

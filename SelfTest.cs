@@ -46,6 +46,8 @@ public static class SelfTest
 
         if (args.Contains("--sendtest")) await SendTestAsync().ConfigureAwait(false);
 
+        if (args.Contains("--localtest")) await LocalRelayTestAsync().ConfigureAwait(false);
+
         Line(string.Empty);
         Line(_failures == 0 ? "ALL CHECKS PASSED" : $"{_failures} CHECK(S) FAILED");
 
@@ -419,6 +421,93 @@ public static class SelfTest
 
             if (!accepted && !roundTrip) _failures++;
         }
+        Line(string.Empty);
+    }
+
+    /// <summary>
+    /// Two clients talking through the built-in relay over loopback, with no
+    /// internet involved at any point. This is the offline path end to end:
+    /// WebSocket handshake, NIP-01 framing, signature verification at the relay,
+    /// history replay and live fan-out.
+    /// </summary>
+    private static async Task LocalRelayTestAsync()
+    {
+        Line("[relay locale: due client, nessun internet]");
+
+        await using var server = new LocalRelayServer();
+        server.Log += line => Line("  server: " + line);
+        int port = server.Start(0); // 0 = let the OS pick a free port
+        string url = $"ws://127.0.0.1:{port}";
+        Line($"  relay su {url}");
+
+        const string geohash = "u0nd9";
+        byte[] seedA = new byte[32];
+        byte[] seedB = new byte[32];
+        for (int i = 0; i < 32; i++) { seedA[i] = (byte)i; seedB[i] = (byte)(255 - i); }
+
+        var alice = NostrIdentity.DeriveForGeohash(seedA, geohash);
+        var bob = NostrIdentity.DeriveForGeohash(seedB, geohash);
+
+        await using var listener = new RelayPool();
+        var received = new List<NostrEvent>();
+        var gate = new object();
+        listener.EventReceived += ev => { lock (gate) received.Add(ev); };
+        listener.SetRelays(new[] { url });
+        listener.Subscribe("local", NostrFilter.GeohashEphemeral(geohash, DateTimeOffset.UtcNow.AddMinutes(-5), 50));
+
+        await using var sender = new RelayPool();
+        sender.SetRelays(new[] { url });
+
+        await Task.Delay(2000).ConfigureAwait(false);
+        Line($"  client connessi al relay: {server.ClientCount}");
+
+        var message = new NostrEvent
+        {
+            Pubkey = bob.PublicKeyHex,
+            CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            Kind = NostrKind.Ephemeral,
+            Tags = new List<List<string>> { new() { "g", geohash }, new() { "n", "bob" } },
+            Content = "ciao senza internet"
+        }.Sign(bob.PrivateKey);
+
+        sender.Publish(message);
+        await Task.Delay(2500).ConfigureAwait(false);
+
+        bool delivered;
+        lock (gate) delivered = received.Any(e => e.Id == message.Id && e.Content == "ciao senza internet");
+        Check("messaggio consegnato all'altro client", delivered.ToString(), "True");
+        Check("relay ha memorizzato l'evento", (server.StoredEventCount >= 1).ToString(), "True");
+
+        // A relay that stores unverified events would let anyone forge messages,
+        // so prove the check is really enforced: same content, broken signature.
+        var forged = new NostrEvent
+        {
+            Pubkey = alice.PublicKeyHex,
+            CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            Kind = NostrKind.Ephemeral,
+            Tags = new List<List<string>> { new() { "g", geohash }, new() { "n", "impostore" } },
+            Content = "messaggio falsificato"
+        }.Sign(bob.PrivateKey); // signed by Bob, but claiming to be Alice
+        forged.Pubkey = alice.PublicKeyHex;
+
+        int before = server.StoredEventCount;
+        sender.Publish(forged);
+        await Task.Delay(1500).ConfigureAwait(false);
+        Check("evento con firma non valida rifiutato", (server.StoredEventCount == before).ToString(), "True");
+
+        // History replay: a client joining afterwards must still see the message.
+        await using var latecomer = new RelayPool();
+        var late = new List<NostrEvent>();
+        latecomer.EventReceived += ev => { lock (gate) late.Add(ev); };
+        latecomer.SetRelays(new[] { url });
+        latecomer.Subscribe("late", NostrFilter.GeohashEphemeral(geohash, DateTimeOffset.UtcNow.AddMinutes(-5), 50));
+        await Task.Delay(2500).ConfigureAwait(false);
+
+        bool replayed;
+        lock (gate) replayed = late.Any(e => e.Id == message.Id);
+        Check("chi arriva dopo riceve lo storico", replayed.ToString(), "True");
+
+        await server.StopAsync().ConfigureAwait(false);
         Line(string.Empty);
     }
 
